@@ -43,6 +43,8 @@ def main() -> None:
 
     result = orchestrator.orchestrate("Research, draft, and execute a launch plan")
 
+    if "Step 1: research" not in result or "Step 2: content" not in result or "Step 3: execution" not in result:
+        raise SystemExit("Smoke test failed: collaboration step sequence missing.")
     if "Execution plan generated from prior outputs." not in result:
         raise SystemExit("Smoke test failed: missing final execution output.")
 

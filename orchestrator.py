@@ -127,10 +127,16 @@ class Orchestrator:
         self.model = model
         self.agent_map = agent_map or AGENT_MAP
         self.planner = planner
+        self._router_client: Optional[OpenAI] = None
+
+    def _get_router_client(self) -> OpenAI:
+        if self._router_client is None:
+            self._router_client = OpenAI(api_key=_require_openai_api_key())
+        return self._router_client
 
     def _plan_sequence(self, task: str) -> List[str]:
         try:
-            client = OpenAI(api_key=_require_openai_api_key())
+            client = self._get_router_client()
             response = client.chat.completions.create(
                 model=self.model,
                 temperature=0,
@@ -160,7 +166,15 @@ class Orchestrator:
                 logger.info("Router selected sequence: %s", " -> ".join(sequence))
                 return sequence
 
-            raise ValueError("Router returned no valid agents.")
+            raise OrchestrationError("Router returned no valid agents.")
+        except OrchestrationError as exc:
+            fallback = _fallback_sequence(task)
+            logger.warning(
+                "Router produced invalid agent sequence (%s). Falling back to keyword routing: %s",
+                exc,
+                " -> ".join(fallback),
+            )
+            return fallback
         except EnvironmentError:
             raise
         except Exception as exc:
