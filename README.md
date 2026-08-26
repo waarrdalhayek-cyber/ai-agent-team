@@ -2,21 +2,30 @@
 
 An autonomous AI agent team built with Python and the OpenAI API.
 
+## What it does
+
+- Keeps the existing orchestrator and specialized agents.
+- Uses the OpenAI API to choose the best agent workflow automatically.
+- Supports sequential collaboration across `research`, `content`, and `execution`.
+- Reads the API key only from the `OPENAI_API_KEY` environment variable.
+- Includes logging, error handling, and a smoke test.
+
 ## Architecture
 
-```
-orchestrator.py          ← entry point; routes tasks to the right agent
+```text
+orchestrator.py          ← CLI entrypoint and OpenAI-backed workflow orchestrator
 agents/
-  base_agent.py          ← shared OpenAI client & run() logic
+  base_agent.py          ← shared OpenAI client, task execution, collaboration context
   research_agent.py      ← gathers and summarises information
   content_agent.py       ← drafts and refines written content
-  execution_agent.py     ← plans and describes concrete action steps
+  execution_agent.py     ← produces concrete action plans and final actionable output
+smoke_test.py            ← local smoke test with a fake OpenAI client
 ```
 
-The design is intentionally modular. New agents can be added by:
-1. Creating a new file in `agents/` that subclasses `BaseAgent`.
-2. Exporting the new class from `agents/__init__.py`.
-3. Registering it in `AGENT_MAP` inside `orchestrator.py`.
+The design remains modular. To add another specialist:
+1. Create a new file in `agents/` that subclasses `BaseAgent`.
+2. Export the class from `agents/__init__.py`.
+3. Register it in `AGENT_MAP` inside `orchestrator.py`.
 
 ## Requirements
 
@@ -26,43 +35,59 @@ The design is intentionally modular. New agents can be added by:
 ## Setup
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/waarrdalhayek-cyber/ai-agent-team.git
 cd ai-agent-team
 
-# 2. Create and activate a virtual environment (recommended)
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Set your OpenAI API key
-#    Option A – export it in your shell (never hard-code it)
-export OPENAI_API_KEY="sk-..."
-
-#    Option B – create a .env file (git-ignored)
-echo 'OPENAI_API_KEY=sk-...' > .env
+export OPENAI_API_KEY="sk-your-real-key"
 ```
 
-## Running
+## Run the agent team
 
 ```bash
-# Let the orchestrator pick the best agent automatically
-python orchestrator.py "Research the latest advances in quantum computing"
+cd ai-agent-team
+source .venv/bin/activate
 
-# Or explicitly choose an agent (research | content | execution)
-python orchestrator.py "Write a blog post about renewable energy" content
-python orchestrator.py "Plan the steps to deploy a web app to AWS" execution
+# Let the orchestrator choose the workflow automatically
+python orchestrator.py "Research the latest AI coding agent trends and turn them into a launch plan"
+
+# Force a single specialist when needed
+python orchestrator.py --agent research "Summarize the latest developments in battery technology"
+python orchestrator.py --agent content "Write a short launch announcement for a new AI product"
+python orchestrator.py --agent execution "Create a rollout checklist for a small Python service"
 ```
 
-## Environment Variables
+## CLI options
 
-| Variable         | Required | Description                    |
-|------------------|----------|--------------------------------|
-| `OPENAI_API_KEY` | ✅ Yes   | Your OpenAI API key            |
+```bash
+python orchestrator.py --help
+python orchestrator.py --log-level DEBUG "Your task here"
+python orchestrator.py --model gpt-4o-mini "Your task here"
+```
+
+## Smoke test
+
+The smoke test does not call the real OpenAI API. It uses a fake client to verify routing, sequential collaboration, and final synthesis.
+
+```bash
+cd ai-agent-team
+source .venv/bin/activate
+
+python smoke_test.py
+```
+
+## Environment variable
+
+| Variable | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | Yes | OpenAI API key used by the orchestrator and all agents |
 
 ## Security
 
-- **Never** hard-code API keys or other secrets in source files.
-- Add `.env` to your `.gitignore` if you use one locally.
+- Never hard-code API keys or secrets in source files, tests, or documentation.
+- The application reads credentials from `OPENAI_API_KEY` at runtime.
+- Keep the key in your shell environment or another secure secret manager.
