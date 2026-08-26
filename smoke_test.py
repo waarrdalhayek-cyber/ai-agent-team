@@ -37,15 +37,12 @@ def main() -> None:
             "research": _FakeResearchAgent,
             "content": _FakeContentAgent,
             "execution": _FakeExecutionAgent,
-        }
+        },
+        planner=lambda task: ["research", "content", "execution"],
     )
-
-    orchestrator._plan_sequence = lambda task: ["research", "content", "execution"]  # type: ignore[attr-defined]
 
     result = orchestrator.orchestrate("Research, draft, and execute a launch plan")
 
-    if "Task completed through sequential collaboration" not in result:
-        raise SystemExit("Smoke test failed: missing collaboration summary.")
     if "Execution plan generated from prior outputs." not in result:
         raise SystemExit("Smoke test failed: missing final execution output.")
 

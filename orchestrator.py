@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import sys
-from typing import Dict, List, Optional, Sequence, Type
+from typing import Callable, Dict, List, Optional, Sequence, Type, TypedDict
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -38,6 +38,11 @@ ROUTER_SYSTEM_PROMPT = (
 
 class OrchestrationError(RuntimeError):
     """Raised when the orchestrator cannot complete a task."""
+
+
+class StepResult(TypedDict):
+    agent: str
+    output: str
 
 
 def _require_openai_api_key() -> str:
@@ -113,9 +118,15 @@ def _fallback_sequence(task: str) -> List[str]:
 class Orchestrator:
     """Coordinates task routing and sequential collaboration among specialized agents."""
 
-    def __init__(self, model: str = "gpt-4o-mini", agent_map: Optional[Dict[str, Type]] = None):
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        agent_map: Optional[Dict[str, Type]] = None,
+        planner: Optional[Callable[[str], List[str]]] = None,
+    ):
         self.model = model
         self.agent_map = agent_map or AGENT_MAP
+        self.planner = planner
 
     def _plan_sequence(self, task: str) -> List[str]:
         try:
@@ -149,7 +160,9 @@ class Orchestrator:
                 logger.info("Router selected sequence: %s", " -> ".join(sequence))
                 return sequence
 
-            raise OrchestrationError("Router returned no valid agents.")
+            raise ValueError("Router returned no valid agents.")
+        except EnvironmentError:
+            raise
         except Exception as exc:
             fallback = _fallback_sequence(task)
             logger.warning(
@@ -166,14 +179,17 @@ class Orchestrator:
                 f"Unknown agent type '{agent_type}'. Choose from: {', '.join(self.agent_map.keys())}"
             )
 
-        logger.info("Delegating to %s", agent_class.__name__)
+        agent_name = getattr(agent_class, "__name__", str(agent_class))
+        logger.info("Delegating to %s", agent_name)
         agent = agent_class(model=self.model)
         result = agent.run(task)
-        logger.info("%s completed", agent_class.__name__)
+        logger.info("%s completed", agent_name)
         return result
 
     @staticmethod
-    def _build_collaboration_prompt(original_task: str, completed_steps: Sequence[dict], next_agent: str) -> str:
+    def _build_collaboration_prompt(
+        original_task: str, completed_steps: Sequence[StepResult], next_agent: str
+    ) -> str:
         if not completed_steps:
             return original_task
 
@@ -192,9 +208,18 @@ class Orchestrator:
         if not task or not task.strip():
             raise ValueError("Task must be a non-empty string.")
 
-        sequence = [forced_agent.lower()] if forced_agent else self._plan_sequence(task)
+        if forced_agent:
+            normalized_agent = forced_agent.lower()
+            if normalized_agent not in self.agent_map:
+                raise ValueError(
+                    f"Unknown agent type '{forced_agent}'. "
+                    f"Choose from: {', '.join(self.agent_map.keys())}"
+                )
+            sequence = [normalized_agent]
+        else:
+            sequence = self.planner(task) if self.planner else self._plan_sequence(task)
 
-        completed_steps: List[dict] = []
+        completed_steps: List[StepResult] = []
         for agent_type in sequence:
             prompt = self._build_collaboration_prompt(task, completed_steps, agent_type)
             output = self._run_single_agent(agent_type, prompt)
@@ -263,7 +288,7 @@ def main() -> None:
         result = Orchestrator(model=args.model).orchestrate(task=args.task, forced_agent=args.agent)
         print("=== Result ===")
         print(result)
-    except (EnvironmentError, ValueError, OrchestrationError, RuntimeError) as exc:
+    except (EnvironmentError, ValueError, RuntimeError) as exc:
         logger.error("Failed to complete task: %s", exc)
         sys.exit(1)
     except Exception as exc:
