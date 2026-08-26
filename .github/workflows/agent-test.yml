@@ -22,4 +22,5 @@ jobs:
       - name: Run AI Agent
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python orchestrator.py "Say exactly: AI Agent Team is working successfully"
+        run: |
+          python orchestrator.py "Say exactly: AI Agent Team is working successfully"
