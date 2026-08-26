@@ -49,7 +49,7 @@ class OrchestratorSmokeTests(unittest.TestCase):
     def test_multi_agent_workflow_collaborates_sequentially(self) -> None:
         client = FakeOpenAIClient(
             [
-                '{"workflow":["execution","research","content"],"reason":"Needs end-to-end help."}',
+                '{"workflow":["research","content","execution"],"reason":"Needs end-to-end help."}',
                 "Research findings",
                 "Drafted content",
                 "Execution plan",

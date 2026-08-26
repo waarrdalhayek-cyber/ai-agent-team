@@ -25,7 +25,7 @@ smoke_test.py            ← local smoke test with a fake OpenAI client
 The design remains modular. To add another specialist:
 1. Create a new file in `agents/` that subclasses `BaseAgent`.
 2. Export the class from `agents/__init__.py`.
-3. Register it in `AGENT_MAP` inside `/home/runner/work/ai-agent-team/ai-agent-team/orchestrator.py`.
+3. Register it in `AGENT_MAP` inside `orchestrator.py`.
 
 ## Requirements
 
@@ -35,7 +35,8 @@ The design remains modular. To add another specialist:
 ## Setup
 
 ```bash
-cd /home/runner/work/ai-agent-team/ai-agent-team
+git clone https://github.com/waarrdalhayek-cyber/ai-agent-team.git
+cd ai-agent-team
 
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -48,7 +49,7 @@ export OPENAI_API_KEY="sk-your-real-key"
 ## Run the agent team
 
 ```bash
-cd /home/runner/work/ai-agent-team/ai-agent-team
+cd ai-agent-team
 source .venv/bin/activate
 
 # Let the orchestrator choose the workflow automatically
@@ -73,7 +74,7 @@ python orchestrator.py --model gpt-4o-mini "Your task here"
 The smoke test does not call the real OpenAI API. It uses a fake client to verify routing, sequential collaboration, and final synthesis.
 
 ```bash
-cd /home/runner/work/ai-agent-team/ai-agent-team
+cd ai-agent-team
 source .venv/bin/activate
 
 python smoke_test.py
