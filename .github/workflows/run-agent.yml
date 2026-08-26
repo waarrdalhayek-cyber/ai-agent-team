@@ -1,0 +1,31 @@
+name: Run AI Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task for the AI agent to execute"
+        required: true
+        type: string
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run orchestrator
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_TASK: ${{ github.event.inputs.task }}
+        run: python orchestrator.py "$AGENT_TASK"
