@@ -27,4 +27,5 @@ jobs:
       - name: Run orchestrator
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python orchestrator.py "${{ github.event.inputs.task }}"
+          AGENT_TASK: ${{ github.event.inputs.task }}
+        run: python orchestrator.py "$AGENT_TASK"
