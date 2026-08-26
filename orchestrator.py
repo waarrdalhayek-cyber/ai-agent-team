@@ -49,209 +49,145 @@ Preserve useful details, remove duplication, and clearly present the final answe
 
 @dataclass
 class WorkflowPlan:
-    workflow: list[str]
-    reason: str
+  workflow: list[str]
+  reason: str
 
 
 class Orchestrator:
-    """Routes a task to one or more specialized agents."""
+  """Routes a task to one or more specialized agents."""
 
-    def __init__(
-        self,
-        model: str = "gpt-4o-mini",
-        client: Any | None = None,
-        agent_model: str | None = None,
-    ) -> None:
-        self.model = model
-        self.agent_model = agent_model or model
-        self.logger = logging.getLogger("orchestrator")
-        self.client = client or OpenAI(api_key=self._get_api_key())
+  def __init__(
+      self,
+      model: str = "gpt-4o-mini",
+      client: Any | None = None,
+      agent_model: str | None = None,
+  ) -> None:
+    self.model = model
+    self.agent_model = agent_model or model
+    self.logger = logging.getLogger("orchestrator")
+    self.client = client or OpenAI(api_key=self._get_api_key())
 
-    @staticmethod
-    def _get_api_key() -> str:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "OPENAI_API_KEY environment variable is not set."
-            )
-        return api_key
+  @staticmethod
+  def _get_api_key() -> str:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    print("--- [DIAGNOSTIC CHECK] ---")
+    if not api_key:
+      print("DIAGNOSTIC FAIL: OPENAI_API_KEY is missing or empty!")
+      raise EnvironmentError(
+          "OPENAI_API_KEY environment variable is not set."
+      )
+    print(
+        f"DIAGNOSTIC PASS: OPENAI_API_KEY is present (Length: {len(api_key)})"
+    )
+    return api_key
 
-    @staticmethod
-    def _extract_json(content: str) -> dict[str, Any]:
-        candidate = content.strip()
-        fenced_match = re.search(r"```(?:json)?\s*(.*?)```", candidate, re.DOTALL)
-        if fenced_match:
-            candidate = fenced_match.group(1).strip()
-        return json.loads(candidate)
+  def plan(self, task: str) -> WorkflowPlan:
+    self.logger.info("Planning workflow for task: %s", task)
+    response = self.client.chat.completions.create(
+        model=self.model,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+            {"role": "user", "content": task},
+        ],
+    )
+    content = response.choices[0].message.content
+    if not content:
+      raise ValueError("Received empty response from router model.")
 
-    def _plan_workflow(self, task: str) -> WorkflowPlan:
-        self.logger.info("Planning workflow")
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
-                    {"role": "user", "content": task},
-                ],
-            )
-        except Exception as exc:  # pragma: no cover - depends on SDK/runtime details
-            self.logger.exception("Workflow planning failed")
-            raise RuntimeError(f"Failed to plan agent workflow: {exc}") from exc
+    data = json.loads(content)
+    workflow = data.get("workflow", [])
+    reason = data.get("reason", "")
 
-        content = response.choices[0].message.content
-        if content is None:
-            raise RuntimeError("Failed to plan agent workflow: empty model response.")
+    validated_workflow = []
+    seen = set()
+    for step in workflow:
+      if step in AGENT_MAP and step not in seen:
+        validated_workflow.append(step)
+        seen.add(step)
 
-        try:
-            payload = self._extract_json(content)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"Failed to parse orchestrator workflow response: {content!r}"
-            ) from exc
+    if not validated_workflow:
+      validated_workflow = ["content"]
+      reason = (
+          "Defaulted to content agent because no valid agents were selected."
+      )
 
-        raw_workflow = payload.get("workflow")
-        if not isinstance(raw_workflow, list) or not raw_workflow:
-            raise RuntimeError(
-                f"Invalid workflow returned by orchestrator: {payload!r}"
-            )
+    validated_workflow.sort(key=lambda s: AGENT_ORDER.get(s, 99))
+    return WorkflowPlan(workflow=validated_workflow, reason=reason)
 
-        unique_workflow = []
-        for item in raw_workflow:
-            if item not in AGENT_MAP:
-                raise RuntimeError(f"Unknown agent in workflow: {item!r}")
-            if item not in unique_workflow:
-                unique_workflow.append(item)
+  def synthesize(self, task: str, results: dict[str, str]) -> str:
+    self.logger.info("Synthesizing results from agents")
+    results_str = "\n\n".join(
+        f"--- {agent_name.upper()} AGENT OUTPUT ---\n{output}"
+        for agent_name, output in results.items()
+    )
+    prompt = f"Original Task: {task}\n\nAgent Results:\n{results_str}"
+    response = self.client.chat.completions.create(
+        model=self.model,
+        messages=[
+            {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    content = response.choices[0].message.content
+    return content if content else "No synthesis generated."
 
-        unique_workflow.sort(key=lambda agent_name: AGENT_ORDER[agent_name])
-        reason = payload.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            reason = "Selected by the orchestrator."
-
-        self.logger.info("Workflow selected: %s", " -> ".join(unique_workflow))
-        return WorkflowPlan(workflow=unique_workflow, reason=reason.strip())
-
-    def _build_collaboration_context(self, results: list[tuple[str, str]]) -> str | None:
-        if not results:
-            return None
-        return "\n\n".join(
-            f"{agent_type.upper()} OUTPUT:\n{output}" for agent_type, output in results
-        )
-
-    def _run_agent(self, agent_type: str, task: str, results: list[tuple[str, str]]) -> str:
-        agent_class = AGENT_MAP[agent_type]
-        self.logger.info("Delegating to %s", agent_class.__name__)
-        agent = agent_class(model=self.agent_model, client=self.client)
-        return agent.run(task, collaboration_context=self._build_collaboration_context(results))
-
-    def _synthesize(self, task: str, workflow: list[str], results: list[tuple[str, str]]) -> str:
-        if len(results) == 1:
-            return results[0][1]
-
-        self.logger.info("Synthesizing final response")
-        collaboration_context = self._build_collaboration_context(results)
-        prompt = (
-            f"Original task:\n{task}\n\n"
-            f"Workflow used: {' -> '.join(workflow)}\n\n"
-            f"Specialist outputs:\n{collaboration_context}\n\n"
-            "Produce the final answer for the user."
-        )
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-        except Exception as exc:  # pragma: no cover - depends on SDK/runtime details
-            self.logger.exception("Final synthesis failed")
-            raise RuntimeError(f"Failed to synthesize the final response: {exc}") from exc
-
-        content = response.choices[0].message.content
-        if content is None:
-            raise RuntimeError("Failed to synthesize the final response: empty model response.")
-        return content.strip()
-
-    def route(self, task: str, agent_type: str) -> str:
-        """Run a task through one explicit specialized agent."""
-        if agent_type not in AGENT_MAP:
-            raise ValueError(
-                f"Unknown agent type '{agent_type}'. Choose from: {', '.join(AGENT_MAP)}"
-            )
-        result = self._run_agent(agent_type, task, [])
-        self.logger.info("Finished with %s", agent_type)
-        return result
-
-    def orchestrate(self, task: str) -> tuple[WorkflowPlan, str]:
-        """Plan the workflow, execute it, and return the final answer."""
-        plan = self._plan_workflow(task)
-        results: list[tuple[str, str]] = []
-
-        for agent_type in plan.workflow:
-            output = self._run_agent(agent_type, task, results)
-            results.append((agent_type, output))
-
-        return plan, self._synthesize(task, plan.workflow, results)
-
-
-def configure_logging(level: str) -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(levelname)s: %(name)s: %(message)s",
+  def run(self, task: str) -> str:
+    plan = self.plan(task)
+    self.logger.info(
+        "Execution plan: %s (Reason: %s)", plan.workflow, plan.reason
     )
 
+    results: dict[str, str] = {}
+    context = task
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Run one task through the autonomous AI agent team."
-    )
-    parser.add_argument("task", nargs="+", help="Task for the orchestrator to execute.")
-    parser.add_argument(
-        "--agent",
-        choices=tuple(AGENT_MAP),
-        help="Optional explicit agent override instead of automatic orchestration.",
-    )
-    parser.add_argument(
-        "--model",
-        default="gpt-4o-mini",
-        help="OpenAI model to use for the orchestrator and agents.",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
-        help="Logging verbosity.",
-    )
-    return parser
+    for agent_name in plan.workflow:
+      agent_cls = AGENT_MAP[agent_name]
+      agent = agent_cls(model=self.agent_model, client=self.client)
+      self.logger.info("Running %s agent", agent_name)
+      output = agent.run(context)
+      results[agent_name] = output
+      context = f"{context}\n\nPrevious Agent Output ({agent_name}):\n{output}"
+
+    if len(results) == 1:
+      final_output = list(results.values())[0]
+    else:
+      final_output = self.synthesize(task, results)
+
+    return final_output
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    configure_logging(args.log_level)
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(
+      description="Orchestrator for autonomous AI agent team."
+  )
+  parser.add_argument("task", type=str, help="The task for the agents to execute.")
+  parser.add_argument(
+      "--model",
+      type=str,
+      default="gpt-4o-mini",
+      help="OpenAI model for routing and synthesis.",
+  )
+  parser.add_argument(
+      "--agent-model",
+      type=str,
+      default=None,
+      help="OpenAI model for specialist agents.",
+  )
+  return parser.parse_args()
 
-    task = " ".join(args.task).strip()
-    if not task:
-        parser.error("Task cannot be empty.")
 
-    try:
-        orchestrator = Orchestrator(model=args.model)
-        if args.agent:
-            print(f"Workflow: {args.agent}")
-            result = orchestrator.route(task, args.agent)
-        else:
-            plan, result = orchestrator.orchestrate(task)
-            print(f"Workflow: {' -> '.join(plan.workflow)}")
-            print(f"Reason: {plan.reason}")
-        print("\n=== Result ===")
-        print(result)
-        return 0
-    except (EnvironmentError, RuntimeError, ValueError) as exc:
-        logging.getLogger("cli").error("%s", exc)
-        return 1
+def main() -> None:
+  logging.basicConfig(
+      level=logging.INFO,
+      format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+  )
+  args = parse_args()
+  orchestrator = Orchestrator(model=args.model, agent_model=args.agent_model)
+  final_answer = orchestrator.run(args.task)
+  print("\n=== FINAL ANSWER ===")
+  print(final_answer)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+  main()
