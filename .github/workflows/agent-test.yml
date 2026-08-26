@@ -1,6 +1,9 @@
 name: Test AI Agent
 
 on:
+  push:
+    branches: ["main"]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -19,8 +22,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run AI Agent
+      - name: Validate syntax
+        run: python -m compileall orchestrator.py agents smoke_test.py
+
+      - name: Validate API key is configured
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python orchestrator.py "Say exactly: AI Agent Team is working successfully"
+          python - <<'EOF'
+          import os, sys
+          key = os.environ.get("OPENAI_API_KEY", "")
+          if not key:
+              print("ERROR: OPENAI_API_KEY secret is not set or is empty.", file=sys.stderr)
+              sys.exit(1)
+          print("API key is present.")
+          EOF
+
+      - name: Run smoke tests
+        run: python smoke_test.py
