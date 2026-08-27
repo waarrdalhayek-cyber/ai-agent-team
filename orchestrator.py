@@ -132,7 +132,35 @@ class Orchestrator:
     content = response.choices[0].message.content
     return content if content else "No synthesis generated."
 
-  def run(self, task: str) -> str:
+  def route(self, task: str, agent_name: str) -> str:
+    if agent_name not in AGENT_MAP:
+      raise ValueError(f"Unknown agent: {agent_name}")
+
+    agent_cls = AGENT_MAP[agent_name]
+    agent = agent_cls(model=self.agent_model, client=self.client)
+    return agent.run(task)
+  def orchestrate(self, task: str) -> tuple[WorkflowPlan, str]:
+    plan = self.plan(task)
+    self.logger.info(
+        "Execution plan: %s (Reason: %s)", plan.workflow, plan.reason
+    )
+
+    results: dict[str, str] = {}
+    context = f"Task:\n{task}"
+
+    for agent_name in plan.workflow:
+      self.logger.info("Running %s agent", agent_name)
+      output = self.route(context, agent_name)
+      results[agent_name] = output
+      context = f"{context}\n\n{agent_name.upper()} OUTPUT:\n{output}"
+
+    if len(results) == 1:
+      final_output = list(results.values())[0]
+    else:
+      final_output = self.synthesize(task, results)
+
+    return plan, final_output
+def run(self, task: str) -> str:
     plan = self.plan(task)
     self.logger.info(
         "Execution plan: %s (Reason: %s)", plan.workflow, plan.reason
