@@ -1,62 +1,49 @@
 """Orchestrator for routing work across the specialized agent team."""
-
 from __future__ import annotations
-
 import argparse
 import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any
-
 from openai import OpenAI
-
-from agents import ContentAgent, ExecutionAgent, ResearchAgent, VideoAgent
+from agents import ContentAgent, ExecutionAgent, LearningAgent, ResearchAgent, TravelAgent, VideoAgent
 
 AGENT_MAP = {
     "research": ResearchAgent,
     "content": ContentAgent,
     "execution": ExecutionAgent,
     "video": VideoAgent,
+    "travel": TravelAgent,
+    "learning": LearningAgent,
 }
-
-AGENT_ORDER = {
-    "research": 0,
-    "content": 1,
-    "execution": 2,
-    "video": 3,
-}
+AGENT_ORDER = {"research": 0, "content": 1, "execution": 2, "video": 3, "travel": 4, "learning": 5}
 
 ROUTER_SYSTEM_PROMPT = """You are an orchestration planner for an autonomous AI agent team.
 Choose the smallest useful workflow using these agents:
 - research: gather facts, analyze information, identify uncertainties
 - content: draft, rewrite, summarize, or structure polished written output
-- execution: turn non-video work into concrete actions or implementation
-- video: understand video requests and prepare/execute video production workflows
-
+- execution: turn general non-specialist work into concrete actions or implementation
+- video: create, edit, animate, assemble, lip-sync, or render video workflows
+- travel: trips, flights, hotels, restaurants, reservations, itineraries, travel comparisons, and calendar-ready travel schedules
+- learning: tutoring, study plans, books/curricula, driving learning, English, mathematics, mental arithmetic, Mawhiba and other educational goals
 Rules:
 - Return JSON only.
-- Schema: {"workflow": ["research"|"content"|"execution"|"video", ...], "reason": "string"}.
-- For requests to create, produce, edit, animate, assemble, lip-sync, or render a video, include video.
-- Do not use execution as a substitute for video production.
-- Choose one or more agents only when useful.
+- Schema: {"workflow": [agent names], "reason": "string"}.
+- Route video-production requests to video, not generic execution.
+- Route travel/reservation requests to travel; add research only when fresh external facts are needed.
+- Route teaching/studying/practice requests to learning; add research only when genuinely necessary.
+- Choose the smallest workflow that can complete the task.
 - Never include an unknown agent.
 """
-
-SYNTHESIS_SYSTEM_PROMPT = """You are the lead orchestrator of an autonomous AI agent team.
-Combine specialist outputs into one final response. Preserve concrete execution results and file paths.
-"""
-
+SYNTHESIS_SYSTEM_PROMPT = """You are the lead orchestrator of an autonomous AI agent team. Combine specialist outputs into one final response. Preserve concrete execution results and file paths. Never claim a booking, payment, calendar write, or external action occurred unless a specialist actually confirmed it."""
 
 @dataclass
 class WorkflowPlan:
     workflow: list[str]
     reason: str
 
-
 class Orchestrator:
-    """Routes a task to one or more specialized agents."""
-
     def __init__(self, model: str = "gpt-4o-mini", client: Any | None = None, agent_model: str | None = None) -> None:
         self.model = model
         self.agent_model = agent_model or model
@@ -71,21 +58,15 @@ class Orchestrator:
         return api_key
 
     def plan(self, task: str) -> WorkflowPlan:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": ROUTER_SYSTEM_PROMPT}, {"role": "user", "content": task}],
-        )
+        response = self.client.chat.completions.create(model=self.model, response_format={"type": "json_object"}, messages=[{"role": "system", "content": ROUTER_SYSTEM_PROMPT}, {"role": "user", "content": task}])
         content = response.choices[0].message.content
         if not content:
             raise ValueError("Received empty response from router model.")
         data = json.loads(content)
-        workflow = []
-        seen = set()
+        workflow, seen = [], set()
         for step in data.get("workflow", []):
             if step in AGENT_MAP and step not in seen:
-                workflow.append(step)
-                seen.add(step)
+                workflow.append(step); seen.add(step)
         if not workflow:
             workflow = ["content"]
         workflow.sort(key=lambda step: AGENT_ORDER.get(step, 99))
@@ -94,18 +75,11 @@ class Orchestrator:
     def route(self, task: str, agent_name: str) -> str:
         if agent_name not in AGENT_MAP:
             raise ValueError(f"Unknown agent: {agent_name}")
-        agent = AGENT_MAP[agent_name](model=self.agent_model, client=self.client)
-        return agent.run(task)
+        return AGENT_MAP[agent_name](model=self.agent_model, client=self.client).run(task)
 
     def synthesize(self, task: str, results: dict[str, str]) -> str:
         results_str = "\n\n".join(f"--- {name.upper()} AGENT OUTPUT ---\n{output}" for name, output in results.items())
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Original Task: {task}\n\nAgent Results:\n{results_str}"},
-            ],
-        )
+        response = self.client.chat.completions.create(model=self.model, messages=[{"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT}, {"role": "user", "content": f"Original Task: {task}\n\nAgent Results:\n{results_str}"}])
         return response.choices[0].message.content or "No synthesis generated."
 
     def orchestrate(self, task: str) -> tuple[WorkflowPlan, str]:
@@ -116,12 +90,10 @@ class Orchestrator:
             output = self.route(context, agent_name)
             results[agent_name] = output
             context += f"\n\n{agent_name.upper()} OUTPUT:\n{output}"
-        final_output = list(results.values())[0] if len(results) == 1 else self.synthesize(task, results)
-        return plan, final_output
+        return plan, (list(results.values())[0] if len(results) == 1 else self.synthesize(task, results))
 
     def run(self, task: str) -> str:
         return self.orchestrate(task)[1]
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Orchestrator for autonomous AI agent team.")
@@ -130,14 +102,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent-model", type=str, default=None)
     return parser.parse_args()
 
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     args = parse_args()
-    orchestrator = Orchestrator(model=args.model, agent_model=args.agent_model)
     print("\n=== FINAL ANSWER ===")
-    print(orchestrator.run(args.task))
-
+    print(Orchestrator(model=args.model, agent_model=args.agent_model).run(args.task))
 
 if __name__ == "__main__":
     main()
