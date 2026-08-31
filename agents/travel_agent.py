@@ -15,9 +15,17 @@ class TravelAgent(BaseAgent):
         model: str = "gpt-4o-mini",
         client: Any | None = None,
         calendar: GoogleCalendarTool | None = None,
+        calendar_only: bool = False,
     ) -> None:
-        super().__init__(name="travel_agent", system_prompt=TRAVEL_SYSTEM_PROMPT, model=model, client=client)
         self._calendar = calendar
+        self._calendar_only = calendar_only
+        if calendar_only:
+            self.name = "travel_agent"
+            self.system_prompt = TRAVEL_SYSTEM_PROMPT
+            self.model = model
+            self.client = client
+        else:
+            super().__init__(name="travel_agent", system_prompt=TRAVEL_SYSTEM_PROMPT, model=model, client=client)
 
     @property
     def calendar(self) -> GoogleCalendarTool:
