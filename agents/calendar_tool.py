@@ -41,7 +41,15 @@ class GoogleCalendarTool:
         return self._service or self.authenticate()
 
     def list_events(self, time_min: str, time_max: str, max_results: int = 50) -> list[dict[str, Any]]:
-        result = self.service.events().list(calendarId=self.calendar_id, timeMin=time_min, timeMax=time_max, singleEvents=True, orderBy="startTime", maxResults=max_results).execute()
+        result = self.service.events().list(
+            calendarId=self.calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=max_results,
+            timeZone="Asia/Riyadh",
+        ).execute()
         return result.get("items", [])
 
     def create_event(self, body: dict[str, Any]) -> dict[str, Any]:
