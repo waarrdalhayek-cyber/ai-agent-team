@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+google_calendar_credentials.json
+google_calendar_token.json
+.env
+__pycache__/
+outputs/
