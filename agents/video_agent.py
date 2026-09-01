@@ -92,7 +92,7 @@ class VideoAgent(BaseAgent):
         return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
 
     def _write_scene1_ass(self, video: Path, lyrics: str, ass_path: Path) -> list[str]:
-        """Create proper UTF-8 ASS subtitles so Arabic shaping/RTL is handled by libass."""
+        """Create sequential Arabic captions in the TikTok-safe central area."""
         lines = [line.strip() for line in lyrics.splitlines() if line.strip()]
         if not lines:
             lines = ["آداب الحديث"]
@@ -115,7 +115,7 @@ class VideoAgent(BaseAgent):
             "",
             "[V4+ Styles]",
             "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-            "Style: Arabic,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H60000000,1,0,0,0,100,100,0,0,1,3,1,2,60,60,150,1",
+            "Style: Arabic,Arial,68,&H00FFFFFF,&H000000FF,&H00000000,&H50000000,-1,0,0,0,100,100,0,0,1,5,2,5,80,80,0,1",
             "",
             "[Events]",
             "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
@@ -162,18 +162,14 @@ class VideoAgent(BaseAgent):
         except FileNotFoundError:
             return {"status": "FFMPEG_MISSING", "paid_credits_used": False}
         if proc.returncode != 0:
-            return {
-                "status": "LOCAL_FINISH_FAILED",
-                "error": proc.stderr[-3000:],
-                "paid_credits_used": False,
-            }
+            return {"status": "LOCAL_FINISH_FAILED", "error": proc.stderr[-3000:], "paid_credits_used": False}
         return {
             "status": "FINISHED_TEST_SCENE_CREATED",
             "output_path": str(output),
             "source_video": str(video),
             "audio_path": str(audio),
             "subtitle_lines": subtitle_lines,
-            "subtitle_mode": "sequential_ass_arabic",
+            "subtitle_mode": "sequential_ass_arabic_center_tiktok_safe",
             "paid_credits_used": False,
         }
 
