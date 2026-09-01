@@ -67,11 +67,66 @@ class VideoAgent(BaseAgent):
         return {"planner_text": raw, "parser_warning": "Planner response was not valid JSON."}
 
     @staticmethod
-    def _escape_subtitle_text(text: str) -> str:
-        return text.replace("\\", r"\\").replace("'", r"\'").replace(":", r"\:").replace("%", r"\%")
+    def _probe_duration(video: Path) -> float:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if proc.returncode == 0:
+            try:
+                return max(float(proc.stdout.strip()), 0.1)
+            except ValueError:
+                pass
+        return 6.0
+
+    @staticmethod
+    def _ass_time(seconds: float) -> str:
+        seconds = max(seconds, 0.0)
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}:{minutes:02d}:{secs:05.2f}"
+
+    @staticmethod
+    def _ass_escape(text: str) -> str:
+        return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+
+    def _write_scene1_ass(self, video: Path, lyrics: str, ass_path: Path) -> list[str]:
+        """Create proper UTF-8 ASS subtitles so Arabic shaping/RTL is handled by libass."""
+        lines = [line.strip() for line in lyrics.splitlines() if line.strip()]
+        if not lines:
+            lines = ["آداب الحديث"]
+        duration = self._probe_duration(video)
+        slot = duration / len(lines)
+        events = []
+        for index, line in enumerate(lines):
+            start = index * slot
+            end = duration if index == len(lines) - 1 else (index + 1) * slot
+            events.append(
+                f"Dialogue: 0,{self._ass_time(start)},{self._ass_time(end)},Arabic,,0,0,0,,{self._ass_escape(line)}"
+            )
+        ass = "\n".join([
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            "PlayResX: 1080",
+            "PlayResY: 1920",
+            "WrapStyle: 2",
+            "ScaledBorderAndShadow: yes",
+            "",
+            "[V4+ Styles]",
+            "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+            "Style: Arabic,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H60000000,1,0,0,0,100,100,0,0,1,3,1,2,60,60,150,1",
+            "",
+            "[Events]",
+            "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+            *events,
+            "",
+        ])
+        ass_path.write_text(ass, encoding="utf-8-sig")
+        return lines
 
     def _finish_test_scene_locally(self) -> dict[str, Any]:
-        """Add the existing song and scene-1 Arabic caption without another AI generation."""
+        """Add the existing song and scene-1 Arabic captions without another AI generation."""
         video = Path("outputs/video/replicate_scene_01.mp4")
         audio = self._pick_asset((".mp3", ".wav", ".m4a", ".aac"))
         scenes = self._load_scene_plan()
@@ -80,25 +135,22 @@ class VideoAgent(BaseAgent):
         if audio is None:
             return {"status": "AUDIO_ASSET_MISSING", "paid_credits_used": False}
 
-        caption = "آداب الحديث"
+        lyrics = "آداب الحديث"
         if scenes and scenes[0].get("lyrics"):
-            caption = str(scenes[0]["lyrics"])
-        caption = self._escape_subtitle_text(caption).replace("\n", r"\n")
+            lyrics = str(scenes[0]["lyrics"])
 
-        output = Path("outputs/video/replicate_scene_01_finished.mp4")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        drawtext = (
-            "drawtext="
-            f"text='{caption}':"
-            "fontfile='C\\:/Windows/Fonts/arial.ttf':"
-            "fontcolor=white:fontsize=44:borderw=3:bordercolor=black:"
-            "x=(w-text_w)/2:y=h-(text_h*2.2)"
-        )
+        output_dir = Path("outputs/video")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = output_dir / "scene_01_arabic.ass"
+        subtitle_lines = self._write_scene1_ass(video, lyrics, ass_path)
+        output = output_dir / "replicate_scene_01_finished.mp4"
+
+        subtitle_filter = f"ass='{ass_path.as_posix()}'"
         command = [
             "ffmpeg", "-y",
             "-i", str(video),
             "-i", str(audio),
-            "-vf", drawtext,
+            "-vf", subtitle_filter,
             "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k",
@@ -120,7 +172,8 @@ class VideoAgent(BaseAgent):
             "output_path": str(output),
             "source_video": str(video),
             "audio_path": str(audio),
-            "caption": scenes[0].get("lyrics") if scenes else "آداب الحديث",
+            "subtitle_lines": subtitle_lines,
+            "subtitle_mode": "sequential_ass_arabic",
             "paid_credits_used": False,
         }
 
