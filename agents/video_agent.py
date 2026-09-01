@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -68,17 +66,14 @@ class VideoAgent(BaseAgent):
         if image is None:
             return {"status": "IMAGE_ASSET_MISSING", "paid_credits_used": False}
         scenes = self._load_scene_plan()
-        # First production proof deliberately uses one simple action to avoid distorted 5-6 second clips.
         prompt = "The boy listens respectfully to the older man speaking, gently nodding once. Natural subtle movement, stable characters."
         if scenes and scenes[0].get("prompt"):
-            # Preserve scene context but keep motion instruction deliberately simple.
-            prompt = f"{scenes[0]['prompt']} The boy gently nods once while listening. Natural subtle movement, stable characters."
-        return generate_image_to_video(prompt, image, Path("outputs/video/fal_scene_01.mp4"))
+            prompt = f"{scenes[0]['prompt']} The boy gently nods once while listening. Natural subtle movement, stable characters, preserve faces and clothing, no new characters, no text."
+        return generate_image_to_video(prompt, image, Path("outputs/video/replicate_scene_01.mp4"))
 
     def run(self, task: str, collaboration_context: str | None = None) -> str:
         plan_text = super().run(task, collaboration_context)
         plan = self._parse_plan(plan_text)
-        # Real Fal execution replaces the old static-image FFmpeg preview path.
         execution = self._generate_real_test_scene()
         manifest = {
             "status": "PRODUCTION_ATTEMPTED",
@@ -89,7 +84,7 @@ class VideoAgent(BaseAgent):
             "real_video_execution": execution,
             "spending_policy": {
                 "paid_generation_authorized": self._paid_generation_authorized(),
-                "rule": "Fal inference is blocked unless explicit financial approval is enabled for this task. Billing changes and purchases are never automated."
+                "rule": "Replicate inference is blocked unless explicit financial approval is enabled for this task. Billing changes and purchases are never automated."
             },
         }
         out = Path("outputs/video")
