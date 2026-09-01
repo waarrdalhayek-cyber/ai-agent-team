@@ -22,8 +22,11 @@ class TrendScoutAgent(CommerceSpecialistAgent):
     def run(self,c):
         m=self.missing()
         if m:return AgentResult(self.name,'CONNECTION_REQUIRED',{},m)
-        q=c.get('query','منتجات رائجة')
-        return AgentResult(self.name,'COMPLETED',{'web':self.tools['web_search'](q),'social':self.tools['social_trends'](q),'marketplaces':self.tools['marketplace_search'](q)})
+        q=c.get('query') or c.get('goal') or 'منتجات وخدمات رائجة في السعودية'
+        output={'web':self.tools['web_search'](q),'social':self.tools['social_trends'](q),'marketplaces':self.tools['marketplace_search'](q)}
+        if not any(output.values()):
+            return AgentResult(self.name,'NO_DATA',output)
+        return AgentResult(self.name,'COMPLETED',output)
 class MarketAnalystAgent(CommerceSpecialistAgent): name='MarketAnalystAgent'; capabilities=('web_search','marketplace_search')
 class CompetitorIntelAgent(CommerceSpecialistAgent): name='CompetitorIntelAgent'; capabilities=('web_search','social_search','ad_library_search')
 class SourcingAgent(CommerceSpecialistAgent): name='SourcingAgent'; capabilities=('supplier_search','shipping_quotes','web_search')
